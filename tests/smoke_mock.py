@@ -8,8 +8,9 @@ from pathlib import Path
 def test_imports():
     """Test that all required packages can be imported."""
     try:
-        import aiohttp
-        import yaml
+        import aiohttp  # noqa: F401
+        import yaml  # noqa: F401
+
         print("✓ All imports successful")
         return True
     except ImportError as e:
@@ -22,39 +23,14 @@ def test_requirements():
     repo_root = Path(__file__).parent.parent
     requirements = repo_root / "requirements.txt"
     requirements_dev = repo_root / "requirements-dev.txt"
-    
+
     if not requirements.exists():
-        print(f"✗ Missing requirements.txt")
+        print("✗ Missing requirements.txt")
         return False
-    
+
     if not requirements_dev.exists():
-        print(f"✗ Missing requirements-dev.txt")
+        print("✗ Missing requirements-dev.txt")
         return False
-    
+
     print("✓ All requirement files exist")
     return True
-
-
-def main():
-    """Run all smoke tests."""
-    print("Running smoke tests...")
-    print("-" * 40)
-    
-    tests = [
-        test_imports,
-        test_requirements,
-    ]
-    
-    results = [test() for test in tests]
-    
-    print("-" * 40)
-    if all(results):
-        print("✓ All smoke tests passed")
-        return 0
-    else:
-        print("✗ Some smoke tests failed")
-        return 1
-
-
-if __name__ == "__main__":
-    sys.exit(main())
