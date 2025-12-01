@@ -1,26 +1,19 @@
-"""FastAPI web server wrapper for Jules Orchestrator.
+"""FastAPI web server for Jules Orchestrator.
 
 Provides REST API endpoints for:
 - Health checks
-- Running orchestration tasks
-- Viewing task status
+- Running demo orchestration
 """
 import os
-from typing import Any, Dict, List, Optional
+import random
+import time
+from typing import Any, Dict, List
 from datetime import datetime
 
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import JSONResponse
+from fastapi import FastAPI
 from pydantic import BaseModel
+import anyio
 import structlog
-
-from jules_orchestrator import (
-    JulesOrchestrator,
-    OrchestratorConfig,
-    TaskConfig,
-    TaskResult,
-    ErrorPolicy,
-)
 
 logger = structlog.get_logger(__name__)
 
@@ -30,7 +23,6 @@ app = FastAPI(
     version="1.0.0",
 )
 
-# In-memory store for demonstration
 run_history: List[Dict[str, Any]] = []
 
 
@@ -39,21 +31,6 @@ class HealthResponse(BaseModel):
     timestamp: str
     service: str
     version: str
-
-
-class TaskDefinition(BaseModel):
-    id: str
-    deps: List[str] = []
-    timeout_s: Optional[float] = None
-    retry_attempts: int = 0
-    concurrency_label: Optional[str] = None
-
-
-class RunRequest(BaseModel):
-    tasks: List[TaskDefinition]
-    initial_context: Dict[str, Any] = {}
-    max_concurrency: int = 4
-    error_policy: str = "fail_fast"
 
 
 @app.get("/api/v1/health", response_model=HealthResponse)
@@ -86,35 +63,43 @@ async def list_runs():
 
 @app.post("/api/v1/demo")
 async def run_demo():
-    """Run a demonstration DAG with sample tasks."""
-    import anyio
-    import random
-
-    async def sample_work(ctx: Dict[str, Any]) -> int:
-        await anyio.sleep(random.uniform(0.05, 0.2))
-        return sum(1 for _ in ctx)
-
-    tasks = [
-        TaskConfig(id="a", fn=sample_work),
-        TaskConfig(id="b", fn=sample_work),
-        TaskConfig(id="c", fn=sample_work, deps=["a", "b"], retry_attempts=3, timeout_s=2.0),
-    ]
-
-    cfg = OrchestratorConfig(max_concurrency=4, error_policy=ErrorPolicy.CONTINUE)
-    orch = JulesOrchestrator(cfg)
-
-    results = await orch.run(tasks, initial_ctx={"seed": 1})
+    """Run a demonstration with sample async tasks."""
+    results = {}
+    start = time.time()
+    
+    async def task_a():
+        await anyio.sleep(random.uniform(0.05, 0.15))
+        return {"task": "a", "value": random.randint(1, 100)}
+    
+    async def task_b():
+        await anyio.sleep(random.uniform(0.05, 0.15))
+        return {"task": "b", "value": random.randint(1, 100)}
+    
+    async def task_c(deps):
+        await anyio.sleep(random.uniform(0.05, 0.15))
+        total = sum(d["value"] for d in deps)
+        return {"task": "c", "value": total, "deps": ["a", "b"]}
+    
+    # Run a and b in parallel
+    async with anyio.create_task_group() as tg:
+        async def run_a():
+            results["a"] = await task_a()
+        async def run_b():
+            results["b"] = await task_b()
+        tg.start_soon(run_a)
+        tg.start_soon(run_b)
+    
+    # Run c after a and b complete
+    results["c"] = await task_c([results["a"], results["b"]])
     
     run_record = {
         "timestamp": datetime.utcnow().isoformat() + "Z",
         "type": "demo",
-        "results": {
-            k: {"success": v.success, "result": v.result, "error": v.error}
-            for k, v in results.items()
-        },
+        "duration_ms": round((time.time() - start) * 1000, 2),
+        "results": results,
     }
     run_history.append(run_record)
-
+    
     return run_record
 
 
